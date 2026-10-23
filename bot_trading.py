@@ -11,7 +11,7 @@ TOKEN = "8812503803:AAGhDdtvMmC_P_pnvhWLTIQ-VCr6JTg_KcA"
 CHAT_ID = "5574325279"
 
 bot = telebot.TeleBot(TOKEN)
-
+bot.remove_wbhook()
 
 def obtener_analisis():
   data = yf.download(

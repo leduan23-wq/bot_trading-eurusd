@@ -1,10 +1,21 @@
+import os
 import threading
 import time
 from datetime import datetime
 import pandas as pd
+from flask import Flask
 import telebot
 from telebot import types
 import yfinance as yf
+
+# 1. Servidor web mínimo obligatorio para que Render Web Service no se cierre
+app = Flask(__name__)
+
+
+@app.route("/")
+def home():
+  return "¡El Bot de Trading EUR/USD está activo y funcionando 24/7!"
+
 
 # Tus credenciales directas
 TOKEN = "8812503803:AAGhDdtvMmC_P_pnvhWLTIQ-VCr6JTg_KcA"
@@ -15,7 +26,7 @@ bot = telebot.TeleBot(TOKEN)
 
 def obtener_analisis():
   try:
-    # 1. Obtener datos diarios (1D) para los niveles clave (Alto, Bajo, 50%)
+    # Obtener datos diarios (1D) para los niveles clave (Alto, Bajo, 50%)
     data_1d = yf.download(
         tickers="EURUSD=X", period="5d", interval="1d", progress=False
     )
@@ -25,13 +36,12 @@ def obtener_analisis():
     if isinstance(data_1d.columns, pd.MultiIndex):
       data_1d.columns = data_1d.columns.get_level_values(0)
 
-    # Tomamos la vela anterior completada del día
     vela_anterior = data_1d.iloc[-2]
     alto_1d = float(vela_anterior["High"])
     bajo_1d = float(vela_anterior["Low"])
     mid_50 = (alto_1d + bajo_1d) / 2
 
-    # 2. Obtener precio actual (intradía)
+    # Obtener precio actual (intradía)
     data_intraday = yf.download(
         tickers="EURUSD=X", period="1d", interval="15m", progress=False
     )
@@ -40,17 +50,15 @@ def obtener_analisis():
 
     precio_actual = float(data_intraday["Close"].iloc[-1])
 
-    # 3. Lógica basada en la estrategia de rangos y barrido de liquidez
-    # Margen de tolerancia para detectar acercamiento a los extremos (1.5%)
+    # Lógica de la estrategia de rangos
     margen = (alto_1d - bajo_1d) * 0.015
 
     estado = "ZONA_MEDIA"
     if precio_actual >= (alto_1d - margen):
-      estado = "VENTA_EXTREMO"  # Tocó el Alto -> Venta hacia el 50%
+      estado = "VENTA_EXTREMO"
     elif precio_actual <= (bajo_1d + margen):
-      estado = "COMPRA_EXTREMO"  # Tocó el Bajo -> Compra hacia el 50%
+      estado = "COMPRA_EXTREMO"
 
-    # Construcción del reporte para Telegram
     mensaje = f"📊 *ESTRATEGIA RANGOS DIARIOS (EUR/USD)*\n"
     mensaje += f"💵 *Precio Actual:* `{precio_actual:.5f}`\n\n"
     mensaje += f"📈 *Alto Día Anterior:* `{alto_1d:.5f}`\n"
@@ -90,7 +98,7 @@ def obtener_analisis():
     return f"⚠️ Error al calcular los niveles de la estrategia: {e}"
 
 
-# Crear botones interactivos del menú
+# Menú interactivo
 def crear_menu():
   markup = types.InlineKeyboardMarkup(row_width=2)
   btn_analisis = types.InlineKeyboardButton(
@@ -142,10 +150,10 @@ def manejar_botones(call):
     )
 
 
-# Bucle automático cada 1 hora para enviar notificaciones
+# Bucle automático cada 1 hora
 def bucle_automatico():
   while True:
-    time.sleep(3600)  # Espera 1 hora exacta
+    time.sleep(3600)
     try:
       informe = obtener_analisis()
       mensaje_final = (
@@ -161,11 +169,21 @@ def bucle_automatico():
       print(f"Error en el envío automático: {e}")
 
 
+# Hilo para el bot de Telegram y Polling
+def iniciar_bot():
+  print("Bot de Telegram iniciado en segundo plano...")
+  bot.infinity_polling(skip_pending=True)
+
+
 if __name__ == "__main__":
-  # Arranca el hilo en segundo plano para las alertas automáticas
+  # Iniciar el bot de Telegram en un hilo separado
+  hilo_bot = threading.Thread(target=iniciar_bot, daemon=True)
+  hilo_bot.start()
+
+  # Iniciar hilo de reportes automáticos
   hilo_hora = threading.Thread(target=bucle_automatico, daemon=True)
   hilo_hora.start()
 
-  print("Bot sincronizado con estrategia de rangos y listo en la nube...")
-  # skip_pending=True evita el error 409 al descartar peticiones viejas atascadas
-  bot.infinity_polling(skip_pending=True)
+  # Iniciar servidor Flask en el hilo principal para cumplir con el Web Service de Render
+  port = int(os.environ.get("PORT", 10000))
+  app.run(host="0.0.0.0", port=port)
